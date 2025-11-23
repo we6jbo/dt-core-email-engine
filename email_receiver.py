@@ -155,13 +155,13 @@ def fetch_new_requests(settings: EmailSettings, state: StatusState) -> List[DTRe
         # Mark as seen so we do not reprocess.
         imap.store(num, "+FLAGS", "\\Deleted")
         delete_any = True
-    if deleted_any:
-        imap.expunge()
-        # Verify there are no remaining dt-in messages
-        typ2, data2 = imap.search(None, 'SUBJECT', '"dt-in RQ"')
-        if typ2 == "OK" and data2 and data2[0].strip():
-            # There are still dt-in messages left, so raise an error.
-            raise InboxNotCleanError("INBOX still has dt-in messages after delete/verify.")
+        if delete_any:
+            imap.expunge()
+            # Verify there are no remaining dt-in messages
+            typ2, data2 = imap.search(None, 'SUBJECT', '"dt-in RQ"')
+            if typ2 == "OK" and data2 and data2[0].strip():
+                # There are still dt-in messages left, so raise an error.
+                raise InboxNotCleanError("INBOX still has dt-in messages after delete/verify.")
     imap.close()
     imap.logout()
     return requests

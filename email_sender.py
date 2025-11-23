@@ -90,7 +90,7 @@ def send_status_email(settings: EmailSettings, state: StatusState, now: datetime
     body = "\n".join(body_lines) + "\n"
 
     msg = EmailMessage()
-    msg["From"] = settings.reply_address
+    msg["From"] = settings.username
     msg["To"] = settings.status_recipient
     msg["Subject"] = subject
     msg.set_content(body)
