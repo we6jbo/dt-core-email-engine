@@ -1,1 +1,2 @@
 Initial entry: placeholder data for automated cycle.
+Second entry: automated harmless line.
