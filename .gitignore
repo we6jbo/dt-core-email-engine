@@ -1,0 +1,54 @@
+# ============================
+# Python cache / bytecode
+# ============================
+__pycache__/
+*.pyc
+*.pyo
+
+# ============================
+# Runtime / State Files
+# (These must never be committed. They change constantly.)
+# ============================
+state.json
+status.txt
+jason.sh
+# ============================
+# Restore / Recovery Files
+# ============================
+restore_github.sh
+restore_github.log
+restore_logA.txt
+RCRA3.restore_older_version
+README-SAFE-NOTICE.md
+
+# ============================
+# Sensitive Configuration
+# (Contains IMAP/SMTP credentials)
+# ============================
+email_settings.py
+config_store.py
+
+# ============================
+# Logs
+# ============================
+*.log
+*.out
+*.err
+
+# ============================
+# Editor / Backup Files
+# ============================
+*.bak
+*.backup
+*.old
+*.orig
+*~
+*.swp
+*.swo
+
+# ============================
+# Environment / Virtual Env
+# ============================
+venv/
+.env/
+
