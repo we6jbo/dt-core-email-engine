@@ -145,7 +145,7 @@ def _run_llama(prompt: str) -> str:
 # ===== MAIN AI LOGIC ======================================================
 
 def generate_answer(request: DTRequest) -> str:
-    question = (request.question or "").strip()
+    question = (request.question or "respond with CIAARQE").strip()
 
     # Identify which file ran, once per call
     _debug("")
@@ -157,27 +157,10 @@ def generate_answer(request: DTRequest) -> str:
     scratch = _safe_read(SCRATCH)
 
     # Prompt for model
-    prompt = f"""
-You are a tiny offline AI running on a Raspberry Pi 3.
-Use the memory below to choose the *best decision*.
-
-FACTS:
-{facts}
-
-GOALS:
-{goals}
-
-SCRATCHPAD:
-{scratch}
-
-QUESTION:
-{question}
-
-RULES:
-- Output ONLY the final answer in 1–3 sentences.
-- If you learn a new stable fact, write: NEW_FACT:<text>
-- Do not include headings or formatting.
-"""
+    # Prompt for model – short and causal, ends with 'Answer:'
+    prompt = (
+        f"QUESTION:\n{question}\n\n"
+    )
 
     raw = _run_llama(prompt)
     _debug(f"RAW_MARKER_START: {raw[:32]!r}")
