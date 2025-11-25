@@ -26,6 +26,20 @@ SCRATCH = DB / "scratchpad.json"
 MODEL = DB / "model.bin"
 LLAMA = "/usr/local/bin/llama"     # installed by install_local_ai.sh
 
+DEBUG_LOG = DB / "decision_engine_debug.log"
+
+# ===== DEBUG HELPER ========================================================
+
+def _debug(msg: str) -> None:
+    """Best-effort append-only debug logging."""
+    try:
+        DB.mkdir(parents=True, exist_ok=True)
+        with DEBUG_LOG.open("a", encoding="utf-8") as f:
+            f.write(msg + "\n")
+    except Exception:
+        # Never let logging crash the engine
+        pass
+
 # ===== HELPERS =============================================================
 
 def _safe_read(path: Path) -> str:
@@ -88,34 +102,43 @@ def _ram_too_low() -> bool:
 
 
 def _run_llama(prompt: str) -> str:
-    """Run llama.cpp safely. Returns '[LLM_ERROR]' on failure."""
+    """
+    Run llama.cpp safely. Returns '[LLM_ERROR]' on failure.
+
+    Tuned for Raspberry Pi 3:
+    - Very small n_predict to keep runtime reasonable.
+    - Generous timeout so the model can actually finish.
+    """
     if not MODEL.exists() or not os.path.exists(LLAMA):
+        _debug("LLM: MODEL or LLAMA missing → [LLM_ERROR]")
         return "[LLM_ERROR]"
 
     if _ram_too_low():
+        _debug("LLM: _ram_too_low() → [LLM_RAM_LIMIT]")
         return "[LLM_RAM_LIMIT]"
 
     try:
-        # This llama build expects the prompt as a positional argument,
-        # according to the usage:
-        #   /usr/local/bin/llama -m model.gguf [-n n_predict] ... [prompt]
+        _debug("LLM: starting llama subprocess")
         result = subprocess.run(
             [
                 LLAMA,
                 "-m", str(MODEL),
-                "-n", "200",
+                "-n", "24",          # keep it short for Pi 3
                 "--temp", "0.5",
-                prompt,  # positional prompt (no -p flag)
+                prompt,              # positional prompt (no -p flag)
             ],
             capture_output=True,
             text=True,
-            timeout=65
+            timeout=180             # plenty of time for slow hardware
         )
         out = (result.stdout or "").strip()
+        _debug(f"LLM: returncode={result.returncode}, len(stdout)={len(out)}")
         if not out:
+            _debug("LLM: empty stdout → [LLM_ERROR]")
             return "[LLM_ERROR]"
         return out
-    except Exception:
+    except Exception as e:
+        _debug(f"LLM: exception → [LLM_ERROR]: {repr(e)}")
         return "[LLM_ERROR]"
 
 
@@ -123,6 +146,11 @@ def _run_llama(prompt: str) -> str:
 
 def generate_answer(request: DTRequest) -> str:
     question = (request.question or "").strip()
+
+    # Identify which file ran, once per call
+    _debug("")
+    _debug(f"=== generate_answer called in {__file__} ===")
+    _debug(f"QUESTION: {question!r}")
 
     facts = _safe_read(FACTS)
     goals = _safe_read(GOALS)
@@ -152,11 +180,13 @@ RULES:
 """
 
     raw = _run_llama(prompt)
+    _debug(f"RAW_MARKER_START: {raw[:32]!r}")
 
     # ==============================================================
     # FALLBACK if model cannot run
     # ==============================================================
     if raw in ("[LLM_ERROR]", "[LLM_RAM_LIMIT]"):
+        _debug(f"FALLBACK: reason={raw}")
         # Hybrid rule-based fallback using memory
         # This is lightweight and safe for Pi 3
         answer = ""
@@ -187,11 +217,13 @@ RULES:
         else:
             answer = "Choose the option that is safest, most stable, and moves you closer to your long-term goals."
 
+        _debug(f"FALLBACK_ANSWER: {answer!r}")
         return answer.strip()
 
     # ==============================================================
     # MODEL SUCCEEDED — process output
     # ==============================================================
+    _debug("MODEL_OK: processing llama output")
     lines = raw.splitlines()
     learned = None
     for line in lines:
@@ -200,11 +232,13 @@ RULES:
 
     # Save new memory + run lesson_learned.py
     if learned:
+        _debug(f"NEW_FACT: {learned!r}")
         _append_fact(learned)
         _run_lesson_learned(learned)
 
     # Remove NEW_FACT lines
     cleaned = "\n".join([l for l in lines if not l.startswith("NEW_FACT:")]).strip()
+    _debug(f"FINAL_ANSWER: {cleaned[:80]!r}")
 
     return cleaned
 
