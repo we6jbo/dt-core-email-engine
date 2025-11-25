@@ -31,8 +31,8 @@ DEBUG_LOG = DB / "decision_engine_debug.log"
 CONFIG_FILE = DB / "config.json"
 
 # Default llama generation config – can be overridden by env, then by config file
-LLAMA_TOKENS_DEFAULT = int(os.environ.get("DT_LLAMA_TOKENS", "96"))
-LLAMA_TIMEOUT_DEFAULT = int(os.environ.get("DT_LLAMA_TIMEOUT", "180"))
+LLAMA_TOKENS_DEFAULT = int(os.environ.get("DT_LLAMA_TOKENS", "64"))
+LLAMA_TIMEOUT_DEFAULT = int(os.environ.get("DT_LLAMA_TIMEOUT", "240"))
 
 # ===== DEBUG HELPER =======================================================
 
@@ -213,10 +213,9 @@ def _ram_too_low() -> bool:
 
     return False
 
-
 def _run_llama(prompt: str, tokens: int, timeout: int) -> str:
     """
-    Run llama.cpp safely. Returns '[LLM_ERROR]' on failure.
+    Run llama.cpp safely. Returns '[LLM_ERROR]' on hard failure.
 
     Tuned for Raspberry Pi 3:
     - Controlled n_predict to keep runtime reasonable.
@@ -255,9 +254,30 @@ def _run_llama(prompt: str, tokens: int, timeout: int) -> str:
             _debug("LLM: empty stdout → [LLM_ERROR]")
             return "[LLM_ERROR]"
         return out
+
+    except subprocess.TimeoutExpired as e:
+        # IMPORTANT: salvage partial output instead of hard failing
+        out = ""
+        try:
+            out = (e.stdout or "").strip()
+        except Exception:
+            pass
+
+        _debug(
+            f"LLM: TimeoutExpired, salvaged_len={len(out)} "
+            f"exception={repr(e)}"
+        )
+
+        if out:
+            # Use whatever llama produced before timeout
+            return out
+
+        return "[LLM_ERROR]"
+
     except Exception as e:
         _debug(f"LLM: exception → [LLM_ERROR]: {repr(e)}")
         return "[LLM_ERROR]"
+
 
 # ===== MAIN AI LOGIC ======================================================
 
