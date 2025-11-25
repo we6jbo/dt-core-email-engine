@@ -7,6 +7,7 @@ Real AI interface for Raspberry Pi (hybrid rules + tiny llama.cpp model).
 - Falls back to memory-based reasoning if RAM is too low or model fails
 - Writes new memory automatically
 - Runs lesson_learned.py when new facts are discovered
+- Supports remote config changes via special CONFIG: questions
 """
 
 import os
@@ -15,7 +16,7 @@ import subprocess
 from pathlib import Path
 from models import DTRequest
 
-# ===== PATHS ===============================================================
+# ===== PATHS & CONFIG =====================================================
 
 DB = Path("/var/lib/dt-core-database/")
 FACTS = DB / "facts.txt"
@@ -24,11 +25,16 @@ SCRATCH = DB / "scratchpad.json"
 
 # model.bin is a symlink to tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
 MODEL = DB / "model.bin"
-LLAMA = "/usr/local/bin/llama"     # installed by install_local_ai.sh
+LLAMA = "/usr/local/bin/llama"  # installed by install_local_ai.sh
 
 DEBUG_LOG = DB / "decision_engine_debug.log"
+CONFIG_FILE = DB / "config.json"
 
-# ===== DEBUG HELPER ========================================================
+# Default llama generation config – can be overridden by env, then by config file
+LLAMA_TOKENS_DEFAULT = int(os.environ.get("DT_LLAMA_TOKENS", "96"))
+LLAMA_TIMEOUT_DEFAULT = int(os.environ.get("DT_LLAMA_TIMEOUT", "180"))
+
+# ===== DEBUG HELPER =======================================================
 
 def _debug(msg: str) -> None:
     """Best-effort append-only debug logging."""
@@ -40,7 +46,114 @@ def _debug(msg: str) -> None:
         # Never let logging crash the engine
         pass
 
-# ===== HELPERS =============================================================
+# ===== CONFIG HELPERS =====================================================
+
+def _load_config() -> dict:
+    """Load persistent config from JSON, or return {} on error."""
+    if not CONFIG_FILE.exists():
+        return {}
+    try:
+        text = CONFIG_FILE.read_text(encoding="utf-8")
+        cfg = json.loads(text)
+        if not isinstance(cfg, dict):
+            return {}
+        return cfg
+    except Exception as e:
+        _debug(f"CONFIG: load error {repr(e)}")
+        return {}
+
+
+def _save_config(cfg: dict) -> None:
+    """Save persistent config to JSON (best effort)."""
+    try:
+        DB.mkdir(parents=True, exist_ok=True)
+        CONFIG_FILE.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+    except Exception as e:
+        _debug(f"CONFIG: save error {repr(e)}")
+
+
+def _effective_llama_params(cfg: dict) -> tuple[int, int]:
+    """Return effective (tokens, timeout) using defaults + config overrides."""
+    tokens = int(cfg.get("llama_tokens", LLAMA_TOKENS_DEFAULT))
+    timeout = int(cfg.get("llama_timeout", LLAMA_TIMEOUT_DEFAULT))
+    return tokens, timeout
+
+
+def _handle_config_command(raw_question: str, cfg: dict) -> tuple[bool, str, dict]:
+    """
+    Handle special CONFIG: commands in the question.
+
+    Returns (handled, response, new_cfg):
+
+    - handled=True: generate_answer should return 'response' and skip llama.
+    - handled=False: treat question as normal.
+    """
+    q = raw_question.strip()
+    upper = q.upper()
+    if not upper.startswith("CONFIG:"):
+        return False, "", cfg
+
+    # Strip leading "CONFIG:"
+    body = q[len("CONFIG:"):].strip()
+    _debug(f"CONFIG: command body={body!r}")
+
+    # RESET_DEFAULTS or RESET
+    if "RESET_DEFAULTS" in body.upper() or body.upper() == "RESET":
+        _debug("CONFIG: RESET_DEFAULTS requested")
+        new_cfg = {}
+        _save_config(new_cfg)
+        tokens, timeout = _effective_llama_params(new_cfg)
+        resp = (
+            "Configuration reset to defaults.\n"
+            f"LLAMA_TOKENS: {tokens}\n"
+            f"LLAMA_TIMEOUT: {timeout}"
+        )
+        return True, resp, new_cfg
+
+    # SHOW current settings
+    if body.upper().startswith("SHOW"):
+        tokens, timeout = _effective_llama_params(cfg)
+        resp = (
+            "Current configuration:\n"
+            f"LLAMA_TOKENS: {tokens}\n"
+            f"LLAMA_TIMEOUT: {timeout}"
+        )
+        return True, resp, cfg
+
+    # Parse simple assignments like:
+    #   CONFIG: LLAMA_TOKENS=120 LLAMA_TIMEOUT=240
+    new_cfg = dict(cfg)
+    parts = body.split()
+    for part in parts:
+        if "=" not in part:
+            continue
+        key, val = part.split("=", 1)
+        key_u = key.strip().upper()
+        val = val.strip()
+        if not val:
+            continue
+        try:
+            num = int(val)
+        except ValueError:
+            continue
+
+        if key_u == "LLAMA_TOKENS":
+            new_cfg["llama_tokens"] = num
+            _debug(f"CONFIG: set llama_tokens={num}")
+        elif key_u == "LLAMA_TIMEOUT":
+            new_cfg["llama_timeout"] = num
+            _debug(f"CONFIG: set llama_timeout={num}")
+
+    _save_config(new_cfg)
+    tokens, timeout = _effective_llama_params(new_cfg)
+    resp = (
+        "Settings updated.\n"
+        f"LLAMA_TOKENS: {tokens}\n"
+        f"LLAMA_TIMEOUT: {timeout}"
+    )
+    return True, resp, new_cfg
+
+# ===== HELPERS ============================================================
 
 def _safe_read(path: Path) -> str:
     if not path.exists():
@@ -63,7 +176,7 @@ def _run_lesson_learned(text: str) -> None:
         subprocess.run(
             ["python3", "/var/lib/dt-core/lesson_learned.py"],
             input=text.encode("utf-8"),
-            timeout=20
+            timeout=20,
         )
     except Exception:
         # Never crash the engine on lesson_learned errors
@@ -101,13 +214,13 @@ def _ram_too_low() -> bool:
     return False
 
 
-def _run_llama(prompt: str) -> str:
+def _run_llama(prompt: str, tokens: int, timeout: int) -> str:
     """
     Run llama.cpp safely. Returns '[LLM_ERROR]' on failure.
 
     Tuned for Raspberry Pi 3:
-    - Very small n_predict to keep runtime reasonable.
-    - Generous timeout so the model can actually finish.
+    - Controlled n_predict to keep runtime reasonable.
+    - Timeout configurable for slow hardware.
     """
     if not MODEL.exists() or not os.path.exists(LLAMA):
         _debug("LLM: MODEL or LLAMA missing → [LLM_ERROR]")
@@ -118,18 +231,23 @@ def _run_llama(prompt: str) -> str:
         return "[LLM_RAM_LIMIT]"
 
     try:
-        _debug("LLM: starting llama subprocess")
+        _debug(
+            f"LLM: starting llama subprocess (tokens={tokens}, timeout={timeout})"
+        )
         result = subprocess.run(
             [
                 LLAMA,
-                "-m", str(MODEL),
-                "-n", "24",          # keep it short for Pi 3
-                "--temp", "0.5",
-                prompt,              # positional prompt (no -p flag)
+                "-m",
+                str(MODEL),
+                "-n",
+                str(tokens),
+                "--temp",
+                "0.5",
+                prompt,  # positional prompt (no -p flag)
             ],
             capture_output=True,
             text=True,
-            timeout=180             # plenty of time for slow hardware
+            timeout=timeout,
         )
         out = (result.stdout or "").strip()
         _debug(f"LLM: returncode={result.returncode}, len(stdout)={len(out)}")
@@ -141,7 +259,6 @@ def _run_llama(prompt: str) -> str:
         _debug(f"LLM: exception → [LLM_ERROR]: {repr(e)}")
         return "[LLM_ERROR]"
 
-
 # ===== MAIN AI LOGIC ======================================================
 
 def generate_answer(request: DTRequest) -> str:
@@ -151,16 +268,42 @@ def generate_answer(request: DTRequest) -> str:
     # Identify which file ran, once per call
     _debug("")
     _debug(f"=== generate_answer called in {__file__} ===")
-    _debug(f"QUESTION: {question!r}")
+    _debug(f"QUESTION_RAW: {question!r}")
+
+    # Load config and effective llama params
+    cfg = _load_config()
+    tokens, timeout = _effective_llama_params(cfg)
+    _debug(f"CONFIG_EFFECTIVE: tokens={tokens}, timeout={timeout}")
+
+    # Handle CONFIG: commands (remote admin via email)
+    handled, cfg_response, new_cfg = _handle_config_command(question, cfg)
+    if handled:
+        _debug("CONFIG: handled, returning config response")
+        # Note: we don't run llama or fallback here at all
+        return cfg_response
 
     facts = _safe_read(FACTS)
     goals = _safe_read(GOALS)
     scratch = _safe_read(SCRATCH)
 
-    # Prompt for model – simple question + explicit "Answer:" cue
-    prompt = f"QUESTION:\n{question}\n\nAnswer:"
+    # Prompt for model – use memory and ask for 2–3 short paragraphs
+    prompt = (
+        "You are a tiny offline helper running on a Raspberry Pi 3.\n"
+        "Use the memory below to choose the best decision or provide helpful guidance.\n\n"
+        f"FACTS:\n{facts}\n\n"
+        f"GOALS:\n{goals}\n\n"
+        f"SCRATCHPAD:\n{scratch}\n\n"
+        f"QUESTION:\n{question}\n\n"
+        "Instructions:\n"
+        "- Answer in 2–3 short paragraphs.\n"
+        "- Total 3–8 sentences.\n"
+        "- You may suggest specific options if helpful.\n"
+        "- If you learn a new stable fact, start a line with 'NEW_FACT:'.\n"
+        "- Do not include headings or bullet points.\n\n"
+        "Answer:"
+    )
 
-    raw = _run_llama(prompt)
+    raw = _run_llama(prompt, tokens=tokens, timeout=timeout)
     _debug(f"RAW_MARKER_START: {raw[:32]!r}")
 
     # ==============================================================
@@ -177,26 +320,41 @@ def generate_answer(request: DTRequest) -> str:
 
         # Security+ logic
         if "security+" in q_lower:
-            answer = "You should continue preparing for the Security+ exam and keep consistent study habits."
+            answer = (
+                "You should continue preparing for the Security+ exam and keep "
+                "consistent study habits."
+            )
 
         # Federal job logic
         elif "job" in q_lower or "apply" in q_lower:
             if "schedule a" in mem or "schedule a" in q_lower:
-                answer = "Use your Schedule A letter and apply to VA, DHS, and Social Security IT or cyber roles."
+                answer = (
+                    "Use your Schedule A letter and apply to VA, DHS, and "
+                    "Social Security IT or cyber roles."
+                )
             else:
                 answer = "Focus on stable federal IT and cybersecurity positions."
 
         # Fitness logic
         elif "run" in q_lower or "front runners" in q_lower:
-            answer = "You should continue running with Front Runners on Tuesday, Thursday, Saturday, and Sunday."
+            answer = (
+                "You should continue running with Front Runners on Tuesday, "
+                "Thursday, Saturday, and Sunday."
+            )
 
         # Health / carbs
         elif "carb" in q_lower or "diet" in q_lower:
-            answer = "Reduce carbs, emphasize lean protein, hydrate well, and maintain sleep stability."
+            answer = (
+                "Reduce carbs, emphasize lean protein, hydrate well, and "
+                "maintain sleep stability."
+            )
 
         # Safety default
         else:
-            answer = "Choose the option that is safest, most stable, and moves you closer to your long-term goals."
+            answer = (
+                "Choose the option that is safest, most stable, and moves you "
+                "closer to your long-term goals."
+            )
 
         _debug(f"FALLBACK_ANSWER: {answer!r}")
         return answer.strip()
@@ -246,6 +404,11 @@ def generate_answer(request: DTRequest) -> str:
     # Remove NEW_FACT lines from final answer
     final_lines = [l for l in lines if not l.startswith("NEW_FACT:")]
     final_answer = "\n".join(final_lines).strip()
+
+    # Clamp to at most 3 paragraphs (separated by blank lines)
+    paras = [p.strip() for p in final_answer.split("\n\n") if p.strip()]
+    if len(paras) > 3:
+        final_answer = "\n\n".join(paras[:3])
 
     _debug(f"FINAL_ANSWER: {final_answer[:80]!r}")
 
