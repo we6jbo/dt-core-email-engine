@@ -145,6 +145,7 @@ def _run_llama(prompt: str) -> str:
 # ===== MAIN AI LOGIC ======================================================
 
 def generate_answer(request: DTRequest) -> str:
+    # Default question only used if request.question is empty/null
     question = (request.question or "respond with CIAARQE").strip()
 
     # Identify which file ran, once per call
@@ -156,11 +157,8 @@ def generate_answer(request: DTRequest) -> str:
     goals = _safe_read(GOALS)
     scratch = _safe_read(SCRATCH)
 
-    # Prompt for model
-    # Prompt for model – short and causal, ends with 'Answer:'
-    prompt = (
-        f"QUESTION:\n{question}\n\n"
-    )
+    # Prompt for model – simple question + explicit "Answer:" cue
+    prompt = f"QUESTION:\n{question}\n\nAnswer:"
 
     raw = _run_llama(prompt)
     _debug(f"RAW_MARKER_START: {raw[:32]!r}")
@@ -207,7 +205,33 @@ def generate_answer(request: DTRequest) -> str:
     # MODEL SUCCEEDED — process output
     # ==============================================================
     _debug("MODEL_OK: processing llama output")
-    lines = raw.splitlines()
+
+    # First, try to cut off everything before "Answer:"
+    text = raw
+    idx = text.lower().find("answer:")
+    if idx != -1:
+        text = text[idx + len("answer:"):]
+
+    # Drop obvious echo/junk lines
+    filtered_lines = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("<s>"):
+            continue
+        if stripped.startswith("--temp"):
+            continue
+        if stripped.upper().startswith("QUESTION:"):
+            continue
+        filtered_lines.append(line)
+
+    cleaned_body = "\n".join(filtered_lines).strip()
+    if not cleaned_body:
+        cleaned_body = raw.strip()
+
+    # Now process NEW_FACT on the cleaned body
+    lines = cleaned_body.splitlines()
     learned = None
     for line in lines:
         if line.startswith("NEW_FACT:"):
@@ -219,9 +243,11 @@ def generate_answer(request: DTRequest) -> str:
         _append_fact(learned)
         _run_lesson_learned(learned)
 
-    # Remove NEW_FACT lines
-    cleaned = "\n".join([l for l in lines if not l.startswith("NEW_FACT:")]).strip()
-    _debug(f"FINAL_ANSWER: {cleaned[:80]!r}")
+    # Remove NEW_FACT lines from final answer
+    final_lines = [l for l in lines if not l.startswith("NEW_FACT:")]
+    final_answer = "\n".join(final_lines).strip()
 
-    return cleaned
+    _debug(f"FINAL_ANSWER: {final_answer[:80]!r}")
+
+    return final_answer
 
