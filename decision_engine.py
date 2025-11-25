@@ -22,6 +22,7 @@ FACTS = DB / "facts.txt"
 GOALS = DB / "goals.txt"
 SCRATCH = DB / "scratchpad.json"
 
+# model.bin is a symlink to tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
 MODEL = DB / "model.bin"
 LLAMA = "/usr/local/bin/llama"     # installed by install_local_ai.sh
 
@@ -35,10 +36,12 @@ def _safe_read(path: Path) -> str:
     except Exception:
         return ""
 
+
 def _append_fact(text: str) -> None:
     DB.mkdir(parents=True, exist_ok=True)
     with FACTS.open("a", encoding="utf-8") as f:
         f.write(text.strip() + "\n")
+
 
 def _run_lesson_learned(text: str) -> None:
     """Run lesson_learned.py by passing text through stdin."""
@@ -49,11 +52,17 @@ def _run_lesson_learned(text: str) -> None:
             timeout=20
         )
     except Exception:
+        # Never crash the engine on lesson_learned errors
         pass
 
 
 def _ram_too_low() -> bool:
-    """Return True if RAM < 1GB or system is under pressure."""
+    """Return True if RAM is likely too low for tiny llama."""
+    # Allow override for testing:
+    #   DT_IGNORE_RAM_CHECK=1 python3 ...
+    if os.environ.get("DT_IGNORE_RAM_CHECK") == "1":
+        return False
+
     try:
         mem = {}
         with open("/proc/meminfo") as f:
@@ -64,12 +73,15 @@ def _ram_too_low() -> bool:
         total = mem.get("MemTotal", 0)
         free = mem.get("MemAvailable", 0)
 
-        # Pi 3 has ~945 MB total; llama.cpp often needs 600–800 MB available.
-        if total < 900000:          # < ~0.9GB
+        # Loosened thresholds for Pi 3:
+        # - total < ~0.7GB → too small for comfort
+        # - available < ~250MB → likely to OOM if we run llama
+        if total < 700_000:      # < ~0.7 GB
             return True
-        if free < 500000:           # < ~500MB available RAM
+        if free < 250_000:       # < ~250 MB available
             return True
     except Exception:
+        # If we can't read meminfo safely, be conservative
         return True
 
     return False
@@ -84,13 +96,22 @@ def _run_llama(prompt: str) -> str:
         return "[LLM_RAM_LIMIT]"
 
     try:
+        # This llama build expects the prompt as a positional argument,
+        # according to the usage:
+        #   /usr/local/bin/llama -m model.gguf [-n n_predict] ... [prompt]
         result = subprocess.run(
-            [LLAMA, "-m", str(MODEL), "-p", prompt, "-n", "200", "--temp", "0.5"],
+            [
+                LLAMA,
+                "-m", str(MODEL),
+                "-n", "200",
+                "--temp", "0.5",
+                prompt,  # positional prompt (no -p flag)
+            ],
             capture_output=True,
             text=True,
             timeout=65
         )
-        out = result.stdout.strip()
+        out = (result.stdout or "").strip()
         if not out:
             return "[LLM_ERROR]"
         return out
@@ -141,24 +162,25 @@ RULES:
         answer = ""
 
         mem = (facts + "\n" + goals).lower()
+        q_lower = question.lower()
 
         # Security+ logic
-        if "security+" in question.lower():
+        if "security+" in q_lower:
             answer = "You should continue preparing for the Security+ exam and keep consistent study habits."
 
         # Federal job logic
-        elif "job" in question.lower() or "apply" in question.lower():
-            if "schedule a" in mem or "schedule a" in question.lower():
+        elif "job" in q_lower or "apply" in q_lower:
+            if "schedule a" in mem or "schedule a" in q_lower:
                 answer = "Use your Schedule A letter and apply to VA, DHS, and Social Security IT or cyber roles."
             else:
                 answer = "Focus on stable federal IT and cybersecurity positions."
 
         # Fitness logic
-        elif "run" in question.lower() or "front runners" in question.lower():
+        elif "run" in q_lower or "front runners" in q_lower:
             answer = "You should continue running with Front Runners on Tuesday, Thursday, Saturday, and Sunday."
 
         # Health / carbs
-        elif "carb" in question.lower() or "diet" in question.lower():
+        elif "carb" in q_lower or "diet" in q_lower:
             answer = "Reduce carbs, emphasize lean protein, hydrate well, and maintain sleep stability."
 
         # Safety default
