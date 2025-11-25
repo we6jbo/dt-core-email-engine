@@ -307,9 +307,11 @@ def generate_answer(request: DTRequest) -> str:
     scratch = _safe_read(SCRATCH)
 
     # Prompt for model – use memory and ask for 2–3 short paragraphs
+    # Prompt for model – use memory but tell it not to repeat labels
     prompt = (
         "You are a tiny offline helper running on a Raspberry Pi 3.\n"
-        "Use the memory below to choose the best decision or provide helpful guidance.\n\n"
+        "Use the information below only as context. Do not repeat the words "
+        "'FACTS', 'GOALS', 'SCRATCHPAD', 'QUESTION', or 'Answer' in your reply.\n\n"
         f"FACTS:\n{facts}\n\n"
         f"GOALS:\n{goals}\n\n"
         f"SCRATCHPAD:\n{scratch}\n\n"
@@ -391,20 +393,38 @@ def generate_answer(request: DTRequest) -> str:
         text = text[idx + len("answer:"):]
 
     # Drop obvious echo/junk lines
+    # Drop obvious echo/junk lines from the prompt
     filtered_lines = []
     for line in text.splitlines():
         stripped = line.strip()
         if not stripped:
             continue
+
+        upper = stripped.upper()
+
+        # Skip typical llama echo artifacts / prompt labels
         if stripped.startswith("<s>"):
             continue
         if stripped.startswith("--temp"):
             continue
-        if stripped.upper().startswith("QUESTION:"):
+        if upper.startswith("QUESTION:"):
             continue
-        filtered_lines.append(line)
+        if upper.startswith("FACTS:"):
+            continue
+        if upper.startswith("GOALS:") or upper.startswith("GOAL:"):
+            continue
+        if upper.startswith("SCRATCHPAD:") or upper.startswith("SCRAMCAP:"):
+            continue
+        if upper == "ANSWER:" or upper == "ANSWER":
+            continue
+        if upper == "QUEST":
+            continue
+
+        filtered_lines.append(stripped)
 
     cleaned_body = "\n".join(filtered_lines).strip()
+
+    # If llama produced nothing useful after filtering, fall back to raw text
     if not cleaned_body:
         cleaned_body = raw.strip()
 
