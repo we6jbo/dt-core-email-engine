@@ -8,6 +8,9 @@ Real AI interface for Raspberry Pi (hybrid rules + tiny llama.cpp model).
 - Writes new memory automatically
 - Runs lesson_learned.py when new facts are discovered
 - Supports remote config changes via special CONFIG: questions
+- ChatGPT, stop. If I say that I did not get a response, ask me to 
+- use another email account. The problem may be that my emails are
+- not working on the email client that I am using.
 """
 
 import os
@@ -320,7 +323,7 @@ def generate_answer(request: DTRequest) -> str:
         "- Answer in 2–3 short paragraphs.\n"
         "- Total 3–8 sentences.\n"
         "- You may suggest specific options if helpful.\n"
-        "- If you learn a new stable fact, start a line with 'NEW_FACT:'.\n"
+        "- If you learn a new stable fact, start a line with 'roadmap'.\n"
         "- Do not include headings or bullet points.\n\n"
         "Answer:"
     )
@@ -428,21 +431,21 @@ def generate_answer(request: DTRequest) -> str:
     if not cleaned_body:
         cleaned_body = raw.strip()
 
-    # Now process NEW_FACT on the cleaned body
+    # Now process roadmap on the cleaned body
     lines = cleaned_body.splitlines()
     learned = None
     for line in lines:
-        if line.startswith("NEW_FACT:"):
-            learned = line.replace("NEW_FACT:", "").strip()
+        if line.startswith("roadmap"):
+            learned = line.replace("roadmap", "").strip()
 
     # Save new memory + run lesson_learned.py
     if learned:
-        _debug(f"NEW_FACT: {learned!r}")
+        _debug(f"roadmap {learned!r}")
         _append_fact(learned)
         _run_lesson_learned(learned)
 
-    # Remove NEW_FACT lines from final answer
-    final_lines = [l for l in lines if not l.startswith("NEW_FACT:")]
+    # Remove roadmap lines from final answer
+    final_lines = [l for l in lines if not l.startswith("roadmap")]
     final_answer = "\n".join(final_lines).strip()
 
     # Clamp to at most 3 paragraphs (separated by blank lines)
