@@ -216,6 +216,7 @@ def _ram_too_low() -> bool:
 
     return False
 
+
 def _run_llama(prompt: str, tokens: int, timeout: int) -> str:
     """
     Run llama.cpp safely. Returns '[LLM_ERROR]' on hard failure.
@@ -396,7 +397,6 @@ def generate_answer(request: DTRequest) -> str:
         text = text[idx + len("answer:"):]
 
     # Drop obvious echo/junk lines
-    # Drop obvious echo/junk lines from the prompt
     filtered_lines = []
     for line in text.splitlines():
         stripped = line.strip()
@@ -431,21 +431,41 @@ def generate_answer(request: DTRequest) -> str:
     if not cleaned_body:
         cleaned_body = raw.strip()
 
-    # Now process roadmap on the cleaned body
+    # Now process roadmap markers anywhere in the cleaned body.
+    # Any text after 'roadmap' on a line is stored as a fact and removed
+    # from the visible answer, so the user never sees the marker.
     lines = cleaned_body.splitlines()
-    learned = None
-    for line in lines:
-        if line.startswith("roadmap"):
-            learned = line.replace("roadmap", "").strip()
+    learned_items: list[str] = []
+    final_lines: list[str] = []
 
-    # Save new memory + run lesson_learned.py
-    if learned:
-        _debug(f"roadmap {learned!r}")
-        _append_fact(learned)
-        _run_lesson_learned(learned)
+    for raw_line in lines:
+        line = raw_line
+        # Strip out all 'roadmap' segments in this line (if multiple)
+        while True:
+            idx_rm = line.find("roadmap")
+            if idx_rm == -1:
+                break
 
-    # Remove roadmap lines from final answer
-    final_lines = [l for l in lines if not l.startswith("roadmap")]
+            before = line[:idx_rm].rstrip()
+            after = line[idx_rm + len("roadmap"):].strip()
+
+            # Save the part after 'roadmap' as a learned fact (if any)
+            if after:
+                learned_items.append(after)
+                _debug(f"roadmap {after!r}")
+
+            # For the visible text, keep only what was before 'roadmap'
+            line = before
+
+        # Whatever is left (if anything) is shown to the user
+        if line.strip():
+            final_lines.append(line.strip())
+
+    # Save new memory + run lesson_learned.py for each roadmap fact
+    for item in learned_items:
+        _append_fact(item)
+        _run_lesson_learned(item)
+
     final_answer = "\n".join(final_lines).strip()
 
     # Clamp to at most 3 paragraphs (separated by blank lines)
