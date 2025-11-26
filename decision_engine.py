@@ -392,7 +392,18 @@ def generate_answer(request: DTRequest) -> str:
 
     # First, try to cut off everything before "Answer:"
     text = raw
+    # ensure text is str, not bytes
+    if text is None:
+        text = ""
+    if isinstance(text, bytes):
+        try:
+            text = text.decode("utf-8", errors="replace")
+        except Exception:
+            # last resort: still make it a string
+            text = text.decode(errors="replace")
+
     idx = text.lower().find("answer:")
+    
     if idx != -1:
         text = text[idx + len("answer:"):]
 
