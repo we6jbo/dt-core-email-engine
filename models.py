@@ -4,10 +4,11 @@ from typing import Optional, Dict
 
 @dataclass
 class DTRequest:
-    request_id: str
-    question: str
-    raw_email_id: str
-    timestamp: str
+    # All fields have defaults so DTRequest(question="...") works.
+    request_id: str = "LOCAL-TEST"
+    question: str = ""
+    raw_email_id: str = "LOCAL"
+    timestamp: str = "0"
     extra_context: Optional[str] = None
 
 
@@ -26,3 +27,4 @@ class Config:
 
 
 Profile = Dict[str, str]
+
