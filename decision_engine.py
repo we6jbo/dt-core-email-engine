@@ -82,6 +82,13 @@ def _effective_llama_params(cfg: dict) -> tuple[int, int]:
     return tokens, timeout
 
 
+def _allowed_sites(cfg: dict) -> set[str]:
+    """Return set of allowed domains from config (lowercased)."""
+    sites = cfg.get("allowed_sites", [])
+    if not isinstance(sites, list):
+        return set()
+    return {str(s).strip().lower() for s in sites if str(s).strip()}
+
 def _handle_config_command(raw_question: str, cfg: dict) -> tuple[bool, str, dict]:
     """
     Handle special CONFIG: commands in the question.
@@ -114,6 +121,15 @@ def _handle_config_command(raw_question: str, cfg: dict) -> tuple[bool, str, dic
         return True, resp, new_cfg
 
     # SHOW current settings
+    # LIST_SITES
+    if body.upper().startswith("LIST_SITES"):
+        sites = sorted(_allowed_sites(cfg))
+        if not sites:
+            resp = "No allowed sites configured yet."
+        else:
+            resp = "Allowed sites:\n" + "\n".join(f"- {s}" for s in sites)
+        return True, resp, cfg
+
     if body.upper().startswith("SHOW"):
         tokens, timeout = _effective_llama_params(cfg)
         resp = (
@@ -135,17 +151,32 @@ def _handle_config_command(raw_question: str, cfg: dict) -> tuple[bool, str, dic
         val = val.strip()
         if not val:
             continue
-        try:
-            num = int(val)
-        except ValueError:
+
+        # Existing numeric settings
+        if key_u in ("LLAMA_TOKENS", "LLAMA_TIMEOUT"):
+            try:
+                num = int(val)
+            except ValueError:
+                continue
+
+            if key_u == "LLAMA_TOKENS":
+                new_cfg["llama_tokens"] = num
+                _debug(f"CONFIG: set llama_tokens={num}")
+            elif key_u == "LLAMA_TIMEOUT":
+                new_cfg["llama_timeout"] = num
+                _debug(f"CONFIG: set llama_timeout={num}")
             continue
 
-        if key_u == "LLAMA_TOKENS":
-            new_cfg["llama_tokens"] = num
-            _debug(f"CONFIG: set llama_tokens={num}")
-        elif key_u == "LLAMA_TIMEOUT":
-            new_cfg["llama_timeout"] = num
-            _debug(f"CONFIG: set llama_timeout={num}")
+        # NEW: add site (string)
+        if key_u == "ADD_SITE":
+            sites = new_cfg.get("allowed_sites", [])
+            if not isinstance(sites, list):
+                sites = []
+            dom = val.lower()
+            if dom not in sites:
+                sites.append(dom)
+                new_cfg["allowed_sites"] = sites
+                _debug(f"CONFIG: added allowed_site={dom}")
 
     _save_config(new_cfg)
     tokens, timeout = _effective_llama_params(new_cfg)
@@ -314,6 +345,14 @@ def generate_answer(request: DTRequest) -> str:
     # Prompt for model – use memory but tell it not to repeat labels
     prompt = (
         "You are a tiny offline helper running on a Raspberry Pi 3.\n"
+        "You cannot browse the internet yourself, but you can *request* "
+        "internet help from another worker.\n"
+        "If you want that worker to fetch from specific sites, list up to "
+        "3 domains on separate lines starting with 'WEB_SITE:' and an "
+        "optional plain-English comment.\n"
+        "Example:\n"
+        "WEB_SITE: ssa.gov (look up benefits)\n"
+        "WEB_SITE: va.gov\n\n"
         "Use the information below only as context. Do not repeat the words "
         "'FACTS', 'GOALS', 'SCRATCHPAD', 'QUESTION', or 'Answer' in your reply.\n\n"
         f"FACTS:\n{facts}\n\n"
@@ -325,6 +364,7 @@ def generate_answer(request: DTRequest) -> str:
         "- Total 3–8 sentences.\n"
         "- You may suggest specific options if helpful.\n"
         "- If you learn a new stable fact, start a line with 'roadmap'.\n"
+        "- If you need internet help, include up to 3 'WEB_SITE:' lines.\n"
         "- Do not include headings or bullet points.\n\n"
         "Answer:"
     )
@@ -478,6 +518,31 @@ def generate_answer(request: DTRequest) -> str:
         _run_lesson_learned(item)
 
     final_answer = "\n".join(final_lines).strip()
+    # Scan for WEB_SITE markers to trigger internet fetch
+    requested_sites: list[str] = []
+    for line in lines:
+        if line.upper().startswith("WEB_SITE:"):
+            # Example format: WEB_SITE: ssa.gov (comment)
+            _, rest = line.split(":", 1)
+            dom = rest.strip().split()[0]  # take first token after colon
+            if dom:
+                requested_sites.append(dom)
+
+    if requested_sites:
+        from web_worker import fetch_from_sites  # local import to avoid cycles
+
+        sites_allow = _allowed_sites(cfg)
+        internet_summary = fetch_from_sites(
+            allowed_sites=sites_allow,
+            requested_sites=requested_sites,
+            query=question,
+        )
+        final_answer = (
+            final_answer
+            + "\n\n"
+            + "----\nInternet helper summary:\n"
+            + internet_summary
+        )
 
     # Clamp to at most 3 paragraphs (separated by blank lines)
     paras = [p.strip() for p in final_answer.split("\n\n") if p.strip()]
