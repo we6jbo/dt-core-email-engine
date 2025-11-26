@@ -89,6 +89,7 @@ def _allowed_sites(cfg: dict) -> set[str]:
         return set()
     return {str(s).strip().lower() for s in sites if str(s).strip()}
 
+
 def _handle_config_command(raw_question: str, cfg: dict) -> tuple[bool, str, dict]:
     """
     Handle special CONFIG: commands in the question.
@@ -120,7 +121,6 @@ def _handle_config_command(raw_question: str, cfg: dict) -> tuple[bool, str, dic
         )
         return True, resp, new_cfg
 
-    # SHOW current settings
     # LIST_SITES
     if body.upper().startswith("LIST_SITES"):
         sites = sorted(_allowed_sites(cfg))
@@ -130,6 +130,7 @@ def _handle_config_command(raw_question: str, cfg: dict) -> tuple[bool, str, dic
             resp = "Allowed sites:\n" + "\n".join(f"- {s}" for s in sites)
         return True, resp, cfg
 
+    # SHOW current settings
     if body.upper().startswith("SHOW"):
         tokens, timeout = _effective_llama_params(cfg)
         resp = (
@@ -430,20 +431,14 @@ def generate_answer(request: DTRequest) -> str:
     # ==============================================================
     _debug("MODEL_OK: processing llama output")
 
-    # First, try to cut off everything before "Answer:"
+    # First, ensure text is str and try to cut off everything before "Answer:"
     text = raw
-    # ensure text is str, not bytes
     if text is None:
         text = ""
     if isinstance(text, bytes):
-        try:
-            text = text.decode("utf-8", errors="replace")
-        except Exception:
-            # last resort: still make it a string
-            text = text.decode(errors="replace")
+        text = text.decode("utf-8", errors="replace")
 
     idx = text.lower().find("answer:")
-    
     if idx != -1:
         text = text[idx + len("answer:"):]
 
@@ -478,9 +473,9 @@ def generate_answer(request: DTRequest) -> str:
 
     cleaned_body = "\n".join(filtered_lines).strip()
 
-    # If llama produced nothing useful after filtering, fall back to raw text
+    # If llama produced nothing useful after filtering, fall back to normalized text
     if not cleaned_body:
-        cleaned_body = raw.strip()
+        cleaned_body = text.strip()
 
     # Now process roadmap markers anywhere in the cleaned body.
     # Any text after 'roadmap' on a line is stored as a fact and removed
@@ -518,6 +513,7 @@ def generate_answer(request: DTRequest) -> str:
         _run_lesson_learned(item)
 
     final_answer = "\n".join(final_lines).strip()
+
     # Scan for WEB_SITE markers to trigger internet fetch
     requested_sites: list[str] = []
     for line in lines:
