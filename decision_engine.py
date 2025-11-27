@@ -342,7 +342,6 @@ def generate_answer(request: DTRequest) -> str:
     goals = _safe_read(GOALS)
     scratch = _safe_read(SCRATCH)
 
-    # Prompt for model – use memory and ask for 2–3 short paragraphs
     # Prompt for model – use memory but tell it not to repeat labels
     prompt = (
         "You are a tiny offline helper running on a Raspberry Pi 3.\n"
@@ -364,7 +363,11 @@ def generate_answer(request: DTRequest) -> str:
         "- Answer in 2–3 short paragraphs.\n"
         "- Total 3–8 sentences.\n"
         "- You may suggest specific options if helpful.\n"
-        "- If you learn a new stable fact, start a line with 'roadmap'.\n"
+        "- If you notice a new stable fact about the user's long-term goals "
+        "or habits,\n"
+        "  add one extra line that begins with 'roadmap ' followed by a "
+        "short fact.\n"
+        "  Example: roadmap Working toward a federal cybersecurity job by 2029.\n"
         "- If you need internet help, include up to 3 'WEB_SITE:' lines.\n"
         "- Do not include headings or bullet points.\n\n"
         "Answer:"
@@ -544,6 +547,15 @@ def generate_answer(request: DTRequest) -> str:
     paras = [p.strip() for p in final_answer.split("\n\n") if p.strip()]
     if len(paras) > 3:
         final_answer = "\n\n".join(paras[:3])
+
+    # If the model produced nothing useful, fall back to a generic safe answer
+    if not final_answer.strip():
+        _debug("FINAL_ANSWER_EMPTY: using generic fallback")
+        final_answer = (
+            "I was not able to generate a detailed answer this time. "
+            "Choose the option that is safest, most stable, and moves you "
+            "closer to your long-term goals."
+        )
 
     _debug(f"FINAL_ANSWER: {final_answer[:80]!r}")
 
