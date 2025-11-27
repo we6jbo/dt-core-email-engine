@@ -159,7 +159,9 @@ def collect_lesson_interactively() -> str:
 
     try:
         # Read multi-line input from stdin
-        lesson_text = sys.stdin.read()
+        #lesson_text = sys.stdin.read()
+        lesson_text = sys.stdin.readline()
+
     except KeyboardInterrupt:
         _stderr("User cancelled input.")
         return ""
