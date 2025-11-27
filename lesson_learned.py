@@ -2,8 +2,12 @@
 """
 lesson_learned.py
 
-Record "lessons learned", append them to a log file, summarize the full log
-into a PDF, and drop a ready-to-push marker file.
+This module is safe to import from decision_engine.py.
+
+RULES:
+- append_lesson_to_file(text) → ONLY append the text and return immediately.
+- NEVER ask for input unless running as __main__.
+- NEVER run PDF/summary/marker steps unless running as __main__.
 
 Paths used:
 - Log file: /var/lib/dt-core/lesson_learned_full_11_23.txt
@@ -15,6 +19,7 @@ import os
 import sys
 import datetime
 from pathlib import Path
+from typing import Optional
 
 # ========= CONSTANTS =========
 
@@ -34,17 +39,33 @@ def _stderr(msg: str) -> None:
 
 
 def append_lesson_to_file(lesson_text: str) -> None:
-    """Append a lesson entry with timestamp to the lessons file."""
+    """
+    Append a lesson entry with timestamp to the lessons file.
+
+    *** NEVER asks for input. NEVER writes PDFs. ***
+
+    This is the ONLY function decision_engine.py calls.
+    It MUST return immediately after writing the text.
+    """
+    text = (lesson_text or "").strip()
+    if not text:
+        _stderr("append_lesson_to_file: empty lesson_text; nothing written.")
+        return
+
     LESSON_FILE.parent.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.datetime.now().isoformat(timespec="seconds")
-    entry = f"\n--- LESSON {timestamp} ---\n{lesson_text.strip()}\n"
+    entry = f"\n--- LESSON {timestamp} ---\n{text}\n"
+
     with LESSON_FILE.open("a", encoding="utf-8") as f:
         f.write(entry)
+
     _stderr(f"Appended lesson to {LESSON_FILE}")
+    # ← IMMEDIATELY RETURN (no extra processing)
+    return
 
 
 def read_full_lessons() -> str:
-    """Read the entire lessons file, return as text."""
+    """Read the entire lessons file (used only for summary generation)."""
     if not LESSON_FILE.exists():
         _stderr(f"{LESSON_FILE} does not exist yet; returning empty text.")
         return ""
@@ -52,10 +73,7 @@ def read_full_lessons() -> str:
 
 
 def _fallback_summary(text: str, max_chars: int = 2000) -> str:
-    """
-    Very simple fallback summarizer used when AI is not available.
-    It just truncates the text and wraps it with a header.
-    """
+    """Simple fallback summarizer."""
     if not text.strip():
         return "No lessons have been recorded yet."
     trimmed = text.strip()
@@ -65,11 +83,7 @@ def _fallback_summary(text: str, max_chars: int = 2000) -> str:
 
 
 def summarize_with_ai(text: str) -> str:
-    """
-    Summarize the lessons text using an AI model if possible.
-    - Uses OpenAI if OPENAI_API_KEY and 'openai' library are available.
-    - Falls back to a simple truncation summary otherwise.
-    """
+    """Attempt OpenAI summarization; fallback if unavailable."""
     if not text.strip():
         return "No lessons have been recorded yet."
 
@@ -87,41 +101,34 @@ def summarize_with_ai(text: str) -> str:
     try:
         client = OpenAI(api_key=api_key)
         resp = client.chat.completions.create(
-            model="gpt-4o-mini",  # adjust if needed
+            model="gpt-4o-mini",
             messages=[
                 {
                     "role": "system",
                     "content": (
-                        "You are a concise assistant. Summarize the following "
-                        "log of 'lessons learned' into a clear, readable summary "
-                        "for a human to review later."
+                        "Summarize the following lessons clearly and concisely."
                     ),
                 },
-                {
-                    "role": "user",
-                    "content": text,
-                },
+                {"role": "user", "content": text},
             ],
             max_tokens=600,
             temperature=0.2,
         )
         summary = resp.choices[0].message.content or ""
         return summary.strip() or _fallback_summary(text)
-    except Exception as e:  # noqa: BLE001
-        _stderr(f"Error during AI summarization: {e!r}. Using fallback summary.")
+    except Exception as e:
+        _stderr(f"Error during AI summarization: {e!r}. Using fallback.")
         return _fallback_summary(text)
 
 
 def write_pdf_summary(summary_text: str, pdf_path: Path) -> None:
     """
-    Write the given summary text into a simple PDF.
-
-    Requires: `pip install fpdf2`
+    Write summary to a PDF. Only used during __main__ invocation.
     """
     try:
         from fpdf import FPDF  # type: ignore
     except ImportError:
-        _stderr("fpdf library not installed. Cannot write PDF summary.")
+        _stderr("fpdf library not installed. Cannot write PDF.")
         return
 
     class PDF(FPDF):
@@ -132,9 +139,9 @@ def write_pdf_summary(summary_text: str, pdf_path: Path) -> None:
     pdf.add_page()
     pdf.set_font("Arial", size=12)
 
-    # Simple multi-line text output
     for line in summary_text.splitlines():
         pdf.multi_cell(0, 8, line)
+
     pdf.output(str(pdf_path))
     _stderr(f"Wrote PDF summary to {pdf_path}")
 
@@ -147,44 +154,36 @@ def write_ready_marker(path: Path) -> None:
 
 
 def collect_lesson_interactively() -> str:
-    """
-    Ask the user to input what they learned and return the text.
-
-    This function can be skipped if another script wants to pass the lesson_text
-    directly into append_lesson_to_file.
-    """
+    """ONLY used in __main__. Reads full multi-line input."""
     print("This is a LESSON LEARNED entry.")
-    print("Please describe what you learned. Finish with Enter, then Ctrl+D (Linux/macOS) or Ctrl+Z, Enter (Windows).")
+    print("Finish with Ctrl+D (Linux/macOS) or Ctrl+Z then Enter (Windows).")
     print("----- START TYPING BELOW -----")
 
     try:
-        # Read multi-line input from stdin
-        #lesson_text = sys.stdin.read()
-        lesson_text = sys.stdin.readline()
-
+        lesson_text = sys.stdin.read()
     except KeyboardInterrupt:
         _stderr("User cancelled input.")
         return ""
-    return lesson_text.strip()
+
+    return (lesson_text or "").strip()
 
 
 # ========= MAIN FLOW =========
 
-def run_lesson_flow(lesson_text: str | None = None) -> None:
+def run_lesson_flow(lesson_text: Optional[str] = None) -> None:
     """
-    Main flow:
-    1. Get lesson text (interactive if not provided).
-    2. Append to lessons file.
-    3. Read full lessons file.
-    4. Summarize with AI/fallback.
-    5. Write summary to PDF.
-    6. Write ready-to-push marker.
+    Full processing pipeline, ONLY used when running this script directly.
+    - interactive or supplied lesson
+    - append
+    - summarize
+    - PDF
+    - ready flag
     """
-    if lesson_text is None or not lesson_text.strip():
+    if not lesson_text:
         lesson_text = collect_lesson_interactively()
 
     if not lesson_text:
-        _stderr("No lesson text provided. Exiting without changes.")
+        _stderr("No lesson provided; exiting.")
         return
 
     append_lesson_to_file(lesson_text)
@@ -195,6 +194,6 @@ def run_lesson_flow(lesson_text: str | None = None) -> None:
 
 
 if __name__ == "__main__":
-    # When run directly: do the full lesson flow interactively.
+    # Only run the full flow when executed manually.
     run_lesson_flow()
-i
+

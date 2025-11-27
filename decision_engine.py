@@ -206,16 +206,25 @@ def _append_fact(text: str) -> None:
 
 
 def _run_lesson_learned(text: str) -> None:
-    """Run lesson_learned.py by passing text through stdin."""
+    """
+    Record lesson text via lesson_learned.append_lesson_to_file().
+
+    This avoids any interactive stdin behavior and just writes the
+    paragraph that decision_engine discovered.
+    """
+    txt = (text or "").strip()
+    if not txt:
+        return
+
     try:
-        subprocess.run(
-            ["python3", "/var/lib/dt-core/lesson_learned.py"],
-            input=text.encode("utf-8"),
-            timeout=20,
-        )
-    except Exception:
+        # Local import to avoid circular imports at module load time
+        from lesson_learned import append_lesson_to_file
+
+        append_lesson_to_file(txt)
+    except Exception as e:
+        _debug(f"LESSON_LEARNED_ERROR: {repr(e)}")
         # Never crash the engine on lesson_learned errors
-        pass
+        return
 
 
 def _ram_too_low() -> bool:
@@ -242,8 +251,9 @@ def _ram_too_low() -> bool:
             return True
         if free < 250_000:       # < ~250 MB available
             return True
-    except Exception:
+    except Exception as e:
         # If we can't read meminfo safely, be conservative
+        _debug(f"RAM_CHECK_ERROR: {repr(e)}")
         return True
 
     return False
@@ -278,14 +288,19 @@ def _run_llama(prompt: str, tokens: int, timeout: int) -> str:
                 str(tokens),
                 "--temp",
                 "0.5",
-                prompt,  # positional prompt (no -p flag)
+                "-p",
+                prompt,
             ],
             capture_output=True,
             text=True,
             timeout=timeout,
         )
         out = (result.stdout or "").strip()
-        _debug(f"LLM: returncode={result.returncode}, len(stdout)={len(out)}")
+        _debug(
+            f"LLM: returncode={result.returncode}, "
+            f"len(stdout)={len(out)}, "
+            f"stderr_snippet={(result.stderr or '')[:120]!r}"
+        )
         if not out:
             _debug("LLM: empty stdout → [LLM_ERROR]")
             return "[LLM_ERROR]"
