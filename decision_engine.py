@@ -370,33 +370,7 @@ def generate_answer(request: DTRequest) -> str:
 
     # Prompt for model – use memory but tell it not to repeat labels
     prompt = (
-        "You are a tiny offline helper running on a Raspberry Pi 3.\n"
-        "You cannot browse the internet yourself, but you can *request* "
-        "internet help from another worker.\n"
-        "If you want that worker to fetch from specific sites, list up to "
-        "3 domains on separate lines starting with 'WEB_SITE:' and an "
-        "optional plain-English comment.\n"
-        "Example:\n"
-        "WEB_SITE: ssa.gov (look up benefits)\n"
-        "WEB_SITE: va.gov\n\n"
-        "Use the information below only as context. Do not repeat the words "
-        "'FACTS', 'GOALS', 'SCRATCHPAD', 'QUESTION', or 'Answer' in your reply.\n\n"
-        f"FACTS:\n{facts}\n\n"
-        f"GOALS:\n{goals}\n\n"
-        f"SCRATCHPAD:\n{scratch}\n\n"
-        f"QUESTION:\n{question}\n\n"
-        "Instructions:\n"
-        "- Answer in 2–3 short paragraphs.\n"
-        "- Total 3–8 sentences.\n"
-        "- You may suggest specific options if helpful.\n"
-        "- If you notice a new stable fact about the user's long-term goals "
-        "or habits,\n"
-        "  add one extra line that begins with 'roadmap ' followed by a "
-        "short fact.\n"
-        "  Example: roadmap Working toward a federal cybersecurity job by 2029.\n"
-        "- If you need internet help, include up to 3 'WEB_SITE:' lines.\n"
-        "- Do not include headings or bullet points.\n\n"
-        "Answer:"
+        f"QUESTION,\n{question}\n\n"
     )
 
     raw = _run_llama(prompt, tokens=tokens, timeout=timeout)
