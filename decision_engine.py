@@ -237,6 +237,7 @@ def _run_lesson_learned(text: str) -> None:
     except Exception as e:
         _debug(f"LESSON_LEARNED_ERROR: {repr(e)}")
         # Never crash the engine on lesson_learned errors
+ this is the area i want to add it to
         return
 
 
