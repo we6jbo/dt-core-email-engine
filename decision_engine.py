@@ -228,16 +228,17 @@ def _run_lesson_learned(text: str) -> None:
     txt = (text or "").strip()
     if not txt:
         return
-
     try:
-        # Local import to avoid circular imports at module load time
-        from lesson_learned import append_lesson_to_file
-
-        append_lesson_to_file(txt)
+        # Call lesson_learned.py directly and pass the lesson text as the argument
+        subprocess.run(
+        ["python3", "/path/to/lesson_learned.py", txt],
+        check=False
+        )
     except Exception as e:
-        _debug(f"LESSON_LEARNED_ERROR: {repr(e)}")
-        # Never crash the engine on lesson_learned errors
- this is the area i want to add it to
+    _debug(f"LESSON_LEARNED_ERROR: {repr(e)}")
+
+    return
+
         return
 
 
