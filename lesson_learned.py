@@ -6,7 +6,7 @@ This module is safe to import from decision_engine.py.
 
 RULES:
 - append_lesson_to_file(text) → ONLY append the text and return immediately.
-- NEVER ask for input unless running as __main__.
+- NEVER ask for input.
 - NEVER run PDF/summary/marker steps unless running as __main__.
 
 Paths used:
@@ -19,7 +19,7 @@ import os
 import sys
 import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Callable
 
 # ========= CONSTANTS =========
 
@@ -60,7 +60,6 @@ def append_lesson_to_file(lesson_text: str) -> None:
         f.write(entry)
 
     _stderr(f"Appended lesson to {LESSON_FILE}")
-    # ← IMMEDIATELY RETURN (no extra processing)
     return
 
 
@@ -153,37 +152,25 @@ def write_ready_marker(path: Path) -> None:
     _stderr(f"Wrote ready marker to {path}")
 
 
-def collect_lesson_interactively() -> str:
-    """ONLY used in __main__. Reads full multi-line input."""
-    print("This is a LESSON LEARNED entry.")
-    print("Finish with Ctrl+D (Linux/macOS) or Ctrl+Z then Enter (Windows).")
-    print("----- START TYPING BELOW -----")
-
-    try:
-        lesson_text = sys.stdin.read()
-    except KeyboardInterrupt:
-        _stderr("User cancelled input.")
-        return ""
-
-    return (lesson_text or "").strip()
-
-
 # ========= MAIN FLOW =========
 
-def run_lesson_flow(lesson_text: Optional[str] = None) -> None:
+def run_lesson_flow(get_lesson: Callable[[], str]) -> None:
     """
-    Full processing pipeline, ONLY used when running this script directly.
-    - interactive or supplied lesson
+    Full processing pipeline, ONLY used when running this script directly
+    or when another script explicitly passes a function.
+
+    get_lesson: a function that returns the lesson_text (no user prompts here).
+
+    Steps:
+    - get lesson text
     - append
     - summarize
     - PDF
     - ready flag
     """
+    lesson_text = (get_lesson() or "").strip()
     if not lesson_text:
-        lesson_text = collect_lesson_interactively()
-
-    if not lesson_text:
-        _stderr("No lesson provided; exiting.")
+        _stderr("No lesson provided by get_lesson(); exiting.")
         return
 
     append_lesson_to_file(lesson_text)
@@ -194,6 +181,9 @@ def run_lesson_flow(lesson_text: Optional[str] = None) -> None:
 
 
 if __name__ == "__main__":
-    # Only run the full flow when executed manually.
-    run_lesson_flow()
+    # Example: no user input, just a hard-coded lesson text.
+    def _example_lesson() -> str:
+        return "lesson_learned.py this is what I learn."
+
+    run_lesson_flow(_example_lesson)
 
