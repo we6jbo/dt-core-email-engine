@@ -220,27 +220,22 @@ def _append_fact(text: str) -> None:
 
 def _run_lesson_learned(text: str) -> None:
     """
-    Record lesson text via lesson_learned.append_lesson_to_file().
-
-    This avoids any interactive stdin behavior and just writes the
-    paragraph that decision_engine discovered.
+    Record lesson text by calling lesson_learned.py with the text argument.
     """
     txt = (text or "").strip()
     if not txt:
         return
+
     try:
         # Call lesson_learned.py directly and pass the lesson text as the argument
         subprocess.run(
-        ["python3", "/path/to/lesson_learned.py", txt],
-        check=False
+            ["python3", "/var/lib/dt-core/lesson_learned.py", txt],
+            check=False,
         )
     except Exception as e:
-    _debug(f"LESSON_LEARNED_ERROR: {repr(e)}")
+        _debug(f"LESSON_LEARNED_ERROR: {repr(e)}")
 
     return
-
-        return
-
 
 def _ram_too_low() -> bool:
     """Return True if RAM is likely too low for tiny llama."""
