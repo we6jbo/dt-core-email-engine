@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 decision_engine.py
 Real AI interface for Raspberry Pi (hybrid rules + tiny llama.cpp model).
@@ -8,9 +9,14 @@ Real AI interface for Raspberry Pi (hybrid rules + tiny llama.cpp model).
 - Writes new memory automatically
 - Runs lesson_learned.py when new facts are discovered
 - Supports remote config changes via special CONFIG: questions
-- ChatGPT, stop. If I say that I did not get a response, ask me to 
+- ChatGPT, stop. If I say that I did not get a response, ask me to
 - use another email account. The problem may be that my emails are
 - not working on the email client that I am using.
+
+Notes:
+- To force llama to run even when RAM is low, set:
+    DT_IGNORE_RAM_CHECK=1
+  in the environment before starting dt-core.
 """
 
 import os
@@ -26,7 +32,7 @@ FACTS = DB / "facts.txt"
 GOALS = DB / "goals.txt"
 SCRATCH = DB / "scratchpad.json"
 
-# model.bin is a symlink to tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+# model.bin is a symlink to tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf (or another GGUF)
 MODEL = DB / "model.bin"
 LLAMA = "/usr/local/bin/llama"  # installed by install_local_ai.sh
 
@@ -232,10 +238,11 @@ def _ram_too_low() -> bool:
     # Allow override for testing:
     #   DT_IGNORE_RAM_CHECK=1 python3 ...
     if os.environ.get("DT_IGNORE_RAM_CHECK") == "1":
+        _debug("RAM_CHECK: DT_IGNORE_RAM_CHECK=1 → bypassing RAM check")
         return False
 
     try:
-        mem = {}
+        mem: dict[str, int] = {}
         with open("/proc/meminfo") as f:
             for line in f:
                 k, v = line.split(":")
@@ -244,12 +251,16 @@ def _ram_too_low() -> bool:
         total = mem.get("MemTotal", 0)
         free = mem.get("MemAvailable", 0)
 
+        _debug(f"RAM_CHECK: MemTotal={total} kB MemAvailable={free} kB")
+
         # Loosened thresholds for Pi 3:
         # - total < ~0.7GB → too small for comfort
         # - available < ~250MB → likely to OOM if we run llama
         if total < 700_000:      # < ~0.7 GB
+            _debug("RAM_CHECK: total < 700000 → True")
             return True
         if free < 250_000:       # < ~250 MB available
+            _debug("RAM_CHECK: free < 250000 → True")
             return True
     except Exception as e:
         # If we can't read meminfo safely, be conservative
