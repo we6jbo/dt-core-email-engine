@@ -24,6 +24,7 @@ import json
 import subprocess
 from pathlib import Path
 from models import DTRequest
+from pathlib import Path
 
 # ===== PATHS & CONFIG =====================================================
 
@@ -269,7 +270,32 @@ def _ram_too_low() -> bool:
 
     return False
 
+def _debug_log(msg: str):
+    """
+    Write a debug message to /tmp/nov-28/debug.txt.
+    If the file grows beyond 40 MB, delete it.
+    Never raises an exception.
+    """
+    try:
+        log_dir = Path("/tmp/nov-28")
+        log_dir.mkdir(parents=True, exist_ok=True)
 
+        log_file = log_dir / "debug.txt"
+
+        # Append message safely
+        with log_file.open("a", encoding="utf-8") as f:
+            f.write(msg.rstrip() + "\n")
+
+        # Check size after write
+        max_bytes = 40 * 1024 * 1024  # 40 MB
+        if log_file.stat().st_size > max_bytes:
+            log_file.unlink()  # delete file
+            # recreate empty file so future logs still work
+            log_file.touch()
+
+    except Exception:
+        # Do NOT crash; logging must be fail-safe
+        pass
 def _run_llama(prompt: str, tokens: int, timeout: int) -> str:
     """
     Run llama.cpp safely. Returns '[LLM_ERROR]' on hard failure.
@@ -373,7 +399,31 @@ def generate_answer(request: DTRequest) -> str:
         f"QUESTION,\n{question}\n\n"
     )
 
+# === RUN LLAMA WITH FULL DEBUGGING =========================================
+    _debug_log("===== RUN LLAMA START =====")
+
+# log prompt details
+    _debug_log(f"PROMPT_LEN: {len(prompt)} chars")
+    _debug_log(f"TOKENS_REQ: {tokens}")
+    _debug_log(f"TIMEOUT: {timeout}")
+    _debug_log("PROMPT_START:")
+    _debug_log(prompt[:500])       # log first 500 chars of prompt
+    _debug_log("PROMPT_END")
+
+# call the llama model
     raw = _run_llama(prompt, tokens=tokens, timeout=timeout)
+
+# log model output
+    _debug_log("LLAMA_RAW_FULL_START")
+    _debug_log(raw)
+    _debug_log("LLAMA_RAW_FULL_END")
+
+# log first 200 characters for quick-view
+    _debug_log(f"LLAMA_RAW_PREVIEW: {raw[:200]!r}")
+
+    _debug_log("===== RUN LLAMA END =====")
+
+    #raw = _run_llama(prompt, tokens=tokens, timeout=timeout)
     _debug(f"RAW_MARKER_START: {raw[:32]!r}")
 
     # ==============================================================
