@@ -5,7 +5,7 @@
 
 FLAG_FILE="/tmp/reset-back-to-nov-28.txt"
 REPO_DIR="/var/lib/dt-core"
-TARGET_REF="restore-2025-11-28b"   # Tag or commit hash to restore to
+TARGET_REF="restore-2025-11-28c"   # Tag or commit hash to restore to
 LOG_FILE="/var/log/dt-core-restore.log"
 
 # If the flag file doesn't exist, just exit quietly
