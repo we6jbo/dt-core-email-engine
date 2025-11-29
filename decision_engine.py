@@ -116,7 +116,7 @@ def _handle_config_command(raw_question: str, cfg: dict) -> tuple[bool, str, dic
     _debug(f"CONFIG: command body={body!r}")
 
     #Restore back to checkmark
-    if body.upper().startswith("TYXWSVF"):
+    if "TYXWSVF" in body.upper() or body.upper() == "NWSYXF":
         path = Path("/tmp/reset-back-to-nov-28.txt")
         path.write_text("reset back to nov 28\n")
 
