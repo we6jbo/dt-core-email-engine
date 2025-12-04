@@ -369,7 +369,49 @@ def _run_llama(prompt: str, tokens: int, timeout: int) -> str:
         _debug(f"LLM: exception → [LLM_ERROR]: {repr(e)}")
         return "[LLM_ERROR]"
 
+def run_llama_with_prompt_supervisor(
+    user_question: str,
+    base_prompt: str,
+    *,
+    tokens: int,
+    timeout: float,
+    max_attempts: int = 2,
+) -> str:
+    """
+    Uses LLM #1 for answers and LLM #2 as a prompt-focused supervisor.
+    LLM #2 can say: 'this prompt is bad; use this improved prompt and retry'.
+    """
+    attempt = 0
+    current_prompt = base_prompt
+    last_answer = ""
 
+    while attempt < max_attempts:
+        attempt += 1
+
+        # Main worker AI (your llama)
+        last_answer = _run_llama(current_prompt, tokens=tokens, timeout=timeout)
+
+        # Ask the second AI system if the PROMPT was good enough
+        ok, improved_prompt = prompt_supervisor_ai(
+            user_question=user_question,
+            prompt=current_prompt,
+            answer=last_answer,
+        )
+
+        if ok:
+            # Supervisor is satisfied with the prompt/answer combo
+            return last_answer
+
+        if improved_prompt:
+            # Supervisor thinks the prompt is the problem and gives a new one
+            current_prompt = improved_prompt
+            continue
+
+        # If supervisor says "not ok" but gives no prompt, break to fallback
+        break
+
+    # Fallback if attempts exhausted or no better prompt available
+    return last_answer or "The system could not generate a reliable answer."
 # ===== MAIN AI LOGIC ======================================================
 
 def generate_answer(request: DTRequest) -> str:
@@ -414,7 +456,13 @@ def generate_answer(request: DTRequest) -> str:
     _debug_log("PROMPT_END")
 
 # call the llama model
-    raw = _run_llama(prompt, tokens=tokens, timeout=timeout)
+#    raw = _run_llama(prompt, tokens=tokens, timeout=timeout)
+    raw = run_llama_with_prompt_supervisor(
+        user_question=question,
+        base_prompt=prompt,
+        tokens=tokens,
+        timeout=timeout,
+    )
 
 # log model output
     _debug_log("LLAMA_RAW_FULL_START")
