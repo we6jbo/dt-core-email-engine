@@ -456,13 +456,13 @@ def generate_answer(request: DTRequest) -> str:
     _debug_log("PROMPT_END")
 
 # call the llama model
-#    raw = _run_llama(prompt, tokens=tokens, timeout=timeout)
-    raw = run_llama_with_prompt_supervisor(
-        user_question=question,
-        base_prompt=prompt,
-        tokens=tokens,
-        timeout=timeout,
-    )
+    raw = _run_llama(prompt, tokens=tokens, timeout=timeout)
+#    raw = run_llama_with_prompt_supervisor(
+#        user_question=question,
+#        base_prompt=prompt,
+#        tokens=tokens,
+#        timeout=timeout,
+#    )
 
 # log model output
     _debug_log("LLAMA_RAW_FULL_START")
