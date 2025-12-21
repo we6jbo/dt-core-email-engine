@@ -44,6 +44,8 @@ CONFIG_FILE = DB / "config.json"
 LLAMA_TOKENS_DEFAULT = int(os.environ.get("DT_LLAMA_TOKENS", "64"))
 LLAMA_TIMEOUT_DEFAULT = int(os.environ.get("DT_LLAMA_TIMEOUT", "240"))
 
+NNCPNET_STATUS_FILE = Path("/var/lib/dt-core/nncpnet.json")
+
 # ===== DEBUG HELPER =======================================================
 
 def _debug(msg: str) -> None:
@@ -210,6 +212,178 @@ def _safe_read(path: Path) -> str:
         return path.read_text(encoding="utf-8")
     except Exception:
         return ""
+
+def _safe_read_json(path: Path) -> dict:
+    """
+    Read JSON from disk safely.
+    Returns {} on error. Never raises.
+    """
+    try:
+        if not path.exists():
+            return {}
+        text = path.read_text(encoding="utf-8").strip()
+        if not text:
+            return {}
+        obj = json.loads(text)
+        if isinstance(obj, dict):
+            return obj
+        return {}
+    except Exception as e:
+        _debug(f"JSON_READ_ERROR: path={str(path)} err={repr(e)}")
+        return {}
+
+
+def _summarize_nncpnet_status() -> str:
+    """
+    Summarize /var/lib/dt-core/nncpnet.json into a human-readable status report.
+    Never raises.
+    """
+    data = _safe_read_json(NNCPNET_STATUS_FILE)
+    if not data:
+        return (
+            "NNCPNET STATUS: unavailable.\n"
+            f"- Missing or unreadable: {NNCPNET_STATUS_FILE}\n"
+            "Tip: confirm the file exists and is valid JSON."
+        )
+
+    # Top-level metadata
+    schema = data.get("schema")
+    created = data.get("created_utc")
+    updated = data.get("updated_utc")
+    read_error = data.get("_read_error")
+
+    counters = data.get("counters", {}) if isinstance(data.get("counters"), dict) else {}
+    total_errors = counters.get("total_errors", 0)
+
+    last = data.get("last_observed", {}) if isinstance(data.get("last_observed"), dict) else {}
+    status = last.get("status", "unknown")
+    state_path = last.get("state_json_path")
+    state_age = last.get("state_json_age_seconds")
+    state_stale = last.get("state_json_stale")
+
+    required_container = last.get("required_container")
+    container_running = last.get("container_running")
+
+    last_error_category = last.get("last_error_category")
+    last_error_summary = last.get("last_error_summary")
+    last_error_raw = last.get("last_error_raw")
+
+    # Error types
+    error_types = data.get("error_types", {}) if isinstance(data.get("error_types"), dict) else {}
+
+    # Network snapshot
+    net = last.get("network_snapshot", {}) if isinstance(last.get("network_snapshot"), dict) else {}
+    default_route = net.get("default_route")
+    gateway = net.get("gateway")
+    gateway_ping_ok = net.get("gateway_ping_ok")
+    dns_google = net.get("dns_ok_google")
+    dns_cf = net.get("dns_ok_cloudflare")
+    ping_1_1_1_1 = net.get("internet_ping_ok_1_1_1_1")
+    target_dns_ok = net.get("target_dns_ok")
+    target_tcp_ok = net.get("target_tcp_ok")
+
+    # Recommendations
+    rec = data.get("recommendations", {}) if isinstance(data.get("recommendations"), dict) else {}
+    next_steps = rec.get("next_steps", [])
+    if not isinstance(next_steps, list):
+        next_steps = []
+
+    lines: list[str] = []
+    lines.append("NNCPNET STATUS")
+    lines.append("")
+
+    # Summary line
+    lines.append(f"- status: {status}")
+    lines.append(f"- total_errors: {total_errors}")
+
+    # Metadata
+    if schema is not None:
+        lines.append(f"- schema: {schema}")
+    if created:
+        lines.append(f"- created_utc: {created}")
+    if updated:
+        lines.append(f"- updated_utc: {updated}")
+
+    # Read error (if present)
+    if read_error:
+        lines.append("")
+        lines.append("Read/parse note:")
+        lines.append(f"- _read_error: {read_error}")
+
+    # Last observed / state.json
+    lines.append("")
+    lines.append("State file:")
+    if state_path:
+        lines.append(f"- state_json_path: {state_path}")
+    if state_age is not None:
+        try:
+            lines.append(f"- state_json_age_seconds: {float(state_age):.1f}")
+        except Exception:
+            lines.append(f"- state_json_age_seconds: {state_age}")
+    if state_stale is not None:
+        lines.append(f"- state_json_stale: {state_stale}")
+
+    # Container
+    lines.append("")
+    lines.append("Container:")
+    if required_container:
+        lines.append(f"- required_container: {required_container}")
+    if container_running is not None:
+        lines.append(f"- container_running: {container_running}")
+
+    # Last error
+    if last_error_category or last_error_summary or last_error_raw:
+        lines.append("")
+        lines.append("Last error:")
+        if last_error_category:
+            lines.append(f"- category: {last_error_category}")
+        if last_error_summary:
+            lines.append(f"- summary: {last_error_summary}")
+        if last_error_raw:
+            lines.append(f"- raw: {last_error_raw}")
+
+    # Error types breakdown (top few)
+    if error_types:
+        lines.append("")
+        lines.append("Error types:")
+        for k in sorted(error_types.keys()):
+            info = error_types.get(k, {})
+            if not isinstance(info, dict):
+                continue
+            cnt = info.get("count")
+            seen = info.get("last_seen_utc")
+            excerpt = info.get("last_error_excerpt")
+            lines.append(f"- {k}: count={cnt}, last_seen_utc={seen}")
+            if excerpt:
+                lines.append(f"  excerpt: {excerpt}")
+
+    # Network snapshot
+    if net:
+        lines.append("")
+        lines.append("Network snapshot:")
+        if gateway:
+            lines.append(f"- gateway: {gateway} (ping_ok={gateway_ping_ok})")
+        lines.append(f"- dns_ok_google: {dns_google}")
+        lines.append(f"- dns_ok_cloudflare: {dns_cf}")
+        lines.append(f"- internet_ping_ok_1_1_1_1: {ping_1_1_1_1}")
+        if default_route:
+            lines.append("- default_route:")
+            # keep it readable even if it contains newlines
+            for ln in str(default_route).splitlines():
+                lines.append(f"  {ln}")
+        lines.append(f"- target_dns_ok: {target_dns_ok}")
+        lines.append(f"- target_tcp_ok: {target_tcp_ok}")
+
+    # Next steps
+    if next_steps:
+        lines.append("")
+        lines.append("Next steps:")
+        for s in next_steps:
+            s2 = str(s).strip()
+            if s2:
+                lines.append(f"- {s2}")
+
+    return "\n".join(lines).strip()
 
 
 def _append_fact(text: str) -> None:
@@ -417,6 +591,13 @@ def run_llama_with_prompt_supervisor(
 def generate_answer(request: DTRequest) -> str:
     # Default question only used if request.question is empty/null
     question = (request.question or "respond with CIAARQE").strip()
+
+    # ===== QUICK COMMANDS (no-LLM) ======================================
+    q_norm = " ".join(question.lower().split())
+    if q_norm == "nncpnet status":
+        _debug("CMD: nncpnet status (no-LLM)")
+        return _summarize_nncpnet_status()
+
 
     # Identify which file ran, once per call
     _debug("")
