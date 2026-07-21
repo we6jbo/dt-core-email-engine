@@ -33,6 +33,18 @@
         "how do i answer a pending question"
       ],
       "answer": "In Network Assistant AI, enter: pending questions. Then use: open question NUMBER. To answer it, use: answer question NUMBER YOUR ANSWER."
+    },
+    {
+      "id": "ai-history-june-july-2026-outlook",
+      "enabled": true,
+      "questions": [
+        "ai history and outlook",
+        "brief history of ai and what to expect next",
+        "what happened in ai recently and what should i expect",
+        "tell me the ai story from june to july 2026",
+        "what should i expect from ai through august 2026"
+      ],
+      "answer": "AI history and outlook, as of July 21, 2026: From early June through July 21, frontier AI moved further from simple chatbots toward agents that can plan, use browsers and terminals, write software, and assist with research. Major model updates emphasized longer tasks, coding, tool use, and practical automation. Governments and AI companies also paid more attention to national security, export controls, safety testing, copyright, privacy, jobs, energy use, and access to the most capable systems. Competition among United States and Chinese AI developers remained intense, while companies continued investing heavily in chips, memory, data centers, and electric power. From July 21 through roughly August 15, expect mostly incremental rather than magical change: more model and agent updates, stronger coding and research tools, additional AI features inside existing products, and more announcements involving regulation, access restrictions, chips, and data center capacity. Some anticipated releases may be delayed or limited to selected users. The safest expectation is rapid practical improvement with uneven reliability, continued human review, and ongoing political and economic debate. This outlook is a forecast, not a guarantee."
     }
   ]
 }

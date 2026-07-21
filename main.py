@@ -29,7 +29,7 @@ POLL_INTERVAL_SECONDS = 60
 GOVERNMENT_JOB_RESTORE_PHRASE = (
     "restore to the time i implemented government job search"
 )
-GOVERNMENT_JOB_RESTORE_TAG = "government-job-search-implemented-v98"
+GOVERNMENT_JOB_RESTORE_TAG = "government-job-search-and-ai-story-v101"
 GOVERNMENT_JOB_RESTORE_FLAG = Path(
     "/var/lib/dt-core/RCRA3.restore_older_version"
 )
@@ -37,8 +37,11 @@ GOVERNMENT_JOB_RESTORE_FLAG = Path(
 
 def _is_government_job_restore_request(question: str) -> bool:
     normalized = " ".join((question or "").strip().lower().split())
-    return normalized == GOVERNMENT_JOB_RESTORE_PHRASE
-
+    accepted_phrases = {
+        "restore to the time i implemented government job search",
+        "restore back to when government job search implementation was implemented and when the story about ai was implemented",
+    }
+    return normalized in accepted_phrases
 
 def _queue_government_job_restore() -> None:
     GOVERNMENT_JOB_RESTORE_FLAG.write_text(
