@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 import time
+from pathlib import Path
 from datetime import datetime
 
 from email_receiver import InboxNotCleanError, fetch_new_requests
@@ -24,6 +25,26 @@ from status_manager import (
 )
 
 POLL_INTERVAL_SECONDS = 60
+
+GOVERNMENT_JOB_RESTORE_PHRASE = (
+    "restore to the time i implemented government job search"
+)
+GOVERNMENT_JOB_RESTORE_TAG = "government-job-search-implemented-v98"
+GOVERNMENT_JOB_RESTORE_FLAG = Path(
+    "/var/lib/dt-core/RCRA3.restore_older_version"
+)
+
+
+def _is_government_job_restore_request(question: str) -> bool:
+    normalized = " ".join((question or "").strip().lower().split())
+    return normalized == GOVERNMENT_JOB_RESTORE_PHRASE
+
+
+def _queue_government_job_restore() -> None:
+    GOVERNMENT_JOB_RESTORE_FLAG.write_text(
+        GOVERNMENT_JOB_RESTORE_TAG + "\n",
+        encoding="utf-8",
+    )
 
 
 def main_loop_once() -> None:
@@ -130,6 +151,30 @@ def main_loop_once() -> None:
 
     for request in requests:
         try:
+            if _is_government_job_restore_request(request.question or ""):
+                record_received_request(state, request)
+                confirmation = (
+                    "Restore request accepted. The Raspberry Pi will restore "
+                    "dt-core to the protected government-job-search timepoint "
+                    "at version 98 or newer."
+                )
+                if send_dt_out(settings, request, confirmation, state):
+                    record_sent_email(state)
+                    _queue_government_job_restore()
+                    print(
+                        "[dt-core] Government job search restore queued for "
+                        f"{request.request_id}.",
+                        flush=True,
+                    )
+                else:
+                    queue_id = enqueue_request(request)
+                    print(
+                        "[dt-core] Restore confirmation could not be sent; "
+                        f"request retained as queue question {queue_id}.",
+                        flush=True,
+                    )
+                continue
+
             known = find_known_answer(request.question or "")
 
             if known is not None:

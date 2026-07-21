@@ -1,145 +1,123 @@
 #!/usr/bin/env python3
-"""
-commit_and_verify.py
+from __future__ import annotations
 
-- Increments commit_ver.txt locally.
-- Commits ALL non-ignored files in /var/lib/dt-core.
-- Pushes to origin/main.
-- Polls the remote raw URL for commit_ver.txt.
-- If the remote value does not match the new local value after retries,
-  exits non-zero so a wrapper can "try something else".
-"""
-
-import os
+import subprocess
 import sys
 import time
-import subprocess
-from urllib.request import urlopen
-from urllib.error import URLError, HTTPError
+from pathlib import Path
 
-REPO_DIR = "/var/lib/dt-core"
-LOCAL_FILE = "commit_ver.txt"
-REMOTE_URL = (
-    "https://raw.githubusercontent.com/we6jbo/dt-core-email-engine/"
-    "refs/heads/main/commit_ver.txt"
-)
-
-MAX_RETRIES = 10
-SLEEP_SECONDS = 10
+REPO = Path("/var/lib/dt-core")
+VERSION_FILE = REPO / "commit_ver.txt"
+FLOOR_FILE = REPO / ".restore_floor"
+REMOTE = "origin"
+BRANCH = "main"
+DEFAULT_FLOOR = 98
+VERIFY_RETRIES = 10
+VERIFY_DELAY = 10
 
 
-def run_cmd(cmd: list[str]) -> subprocess.CompletedProcess:
-    """Run a command and return CompletedProcess, raising on error."""
-    print(f"[commit-bot] Running: {' '.join(cmd)}")
-    return subprocess.run(cmd, check=True, text=True, capture_output=True)
+def run(*args: str, capture: bool = False) -> subprocess.CompletedProcess[str]:
+    print("+", " ".join(args), flush=True)
+    return subprocess.run(
+        args,
+        cwd=REPO,
+        check=True,
+        text=True,
+        capture_output=capture,
+    )
 
 
-def read_local_version() -> int:
-    """Read local commit_ver.txt as an int. If missing/invalid, treat as 0."""
-    path = os.path.join(REPO_DIR, LOCAL_FILE)
+def read_int(path: Path, label: str) -> int:
+    raw = path.read_text(encoding="utf-8").strip()
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            raw = f.read().strip()
         return int(raw)
-    except FileNotFoundError:
-        print("[commit-bot] No local commit_ver.txt found, starting at 0.")
-        return 0
-    except ValueError:
-        print("[commit-bot] Invalid local commit_ver.txt, treating as 0.")
-        return 0
+    except ValueError as exc:
+        raise RuntimeError(f"{label} is not an integer: {raw!r}") from exc
 
 
-def write_local_version(new_ver: int) -> None:
-    """Write new integer version to commit_ver.txt."""
-    path = os.path.join(REPO_DIR, LOCAL_FILE)
-    print(f"[commit-bot] Writing local {LOCAL_FILE} = {new_ver}")
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(f"{new_ver}\n")
+def protected_floor() -> int:
+    if not FLOOR_FILE.exists():
+        return DEFAULT_FLOOR
+    floor = read_int(FLOOR_FILE, str(FLOOR_FILE))
+    if floor < DEFAULT_FLOOR:
+        raise RuntimeError(
+            f"Restore floor {floor} is below mandatory minimum {DEFAULT_FLOOR}"
+        )
+    return floor
 
 
-def read_remote_version() -> int | None:
-    """Fetch remote commit_ver.txt. Return int or None if not available/invalid."""
-    print(f"[commit-bot] Checking remote {REMOTE_URL}")
+def remote_version() -> int | None:
     try:
-        with urlopen(REMOTE_URL, timeout=10) as resp:
-            raw = resp.read().decode("utf-8").strip()
-        print(f"[commit-bot] Remote raw content: {raw!r}")
+        run("git", "fetch", REMOTE, BRANCH)
+        raw = run(
+            "git", "show", f"{REMOTE}/{BRANCH}:commit_ver.txt", capture=True
+        ).stdout.strip()
         return int(raw)
-    except (HTTPError, URLError) as e:
-        print(f"[commit-bot] Remote fetch error: {e}")
+    except (subprocess.CalledProcessError, ValueError):
         return None
-    except ValueError:
-        print("[commit-bot] Remote commit_ver.txt not an integer.")
-        return None
+
+
+def validate() -> None:
+    py_files = [
+        str(path.relative_to(REPO))
+        for path in REPO.glob("*.py")
+        if path.is_file()
+    ]
+    if py_files:
+        run(sys.executable, "-m", "py_compile", *py_files)
+
+    for name in ("restore_github.sh", "dt-core-restore.sh", "lesson.sh"):
+        path = REPO / name
+        if path.exists():
+            run("bash", "-n", str(path))
 
 
 def main() -> int:
-    # 1. cd into repo
-    try:
-        os.chdir(REPO_DIR)
-    except OSError as e:
-        print(f"[commit-bot] ERROR: Cannot chdir to {REPO_DIR}: {e}")
-        return 1
+    floor = protected_floor()
+    local = read_int(VERSION_FILE, str(VERSION_FILE))
+    if local < floor:
+        raise RuntimeError(
+            f"Local version {local} is below protected floor {floor}; refusing."
+        )
 
-    # 2. Increment local commit_ver
-    current_local = read_local_version()
-    new_ver = current_local + 1
-    write_local_version(new_ver)
+    remote = remote_version()
+    if remote is not None and remote < floor:
+        raise RuntimeError(
+            f"Remote version {remote} is below protected floor {floor}; refusing."
+        )
 
-    # 3. Stage ALL changes (respects .gitignore)
-    try:
-        run_cmd(["git", "add", "."])
+    new_version = max(local, remote or floor, floor) + 1
+    validate()
+    VERSION_FILE.write_text(f"{new_version}\n", encoding="utf-8")
 
-        commit_msg = f"Auto commit_ver {new_ver}"
-        try:
-            result = run_cmd(["git", "commit", "-m", commit_msg])
-            print(result.stdout)
-        except subprocess.CalledProcessError as e:
-            # If there's truly nothing to commit, we can still try pushing.
-            text = (e.stdout or "") + (e.stderr or "")
-            if "nothing to commit" in text:
-                print("[commit-bot] Nothing to commit after bumping commit_ver.txt (unexpected).")
-                # In theory this should not happen because we just wrote commit_ver.txt.
-                # Still, continue to push in case remote is behind.
-            else:
-                print("[commit-bot] git commit failed:")
-                print(e.stdout)
-                print(e.stderr)
-                return 1
+    run("git", "add", "-A")
+    diff = subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=REPO)
+    if diff.returncode == 0:
+        print("Nothing to commit.")
+        return 0
 
-        # 4. Push to origin/main
-        result = run_cmd(["git", "push", "origin", "main"])
-        print(result.stdout)
-    except subprocess.CalledProcessError as e:
-        print("[commit-bot] Git command failed:")
-        print(e.stdout)
-        print(e.stderr)
-        return 1
+    run("git", "commit", "-m", f"Auto commit_ver {new_version}")
+    run("git", "push", REMOTE, f"HEAD:{BRANCH}")
 
-    # 5. Verify the remote commit_ver.txt matches new_ver
-    print(f"[commit-bot] Verifying remote version reaches {new_ver}...")
-    for attempt in range(1, MAX_RETRIES + 1):
-        remote_ver = read_remote_version()
-        if remote_ver is None:
-            print(f"[commit-bot] Attempt {attempt}/{MAX_RETRIES}: remote version unavailable.")
-        elif remote_ver == new_ver:
-            print(f"[commit-bot] SUCCESS: Remote commit_ver.txt is now {remote_ver}.")
+    for attempt in range(1, VERIFY_RETRIES + 1):
+        verified = remote_version()
+        if verified == new_version:
+            print(f"SUCCESS: remote commit_ver is {verified}.")
             return 0
-        else:
-            print(
-                f"[commit-bot] Attempt {attempt}/{MAX_RETRIES}: "
-                f"remote_ver={remote_ver}, expected={new_ver}"
-            )
+        print(
+            f"Verification {attempt}/{VERIFY_RETRIES}: "
+            f"remote={verified!r}, expected={new_version}"
+        )
+        if attempt < VERIFY_RETRIES:
+            time.sleep(VERIFY_DELAY)
 
-        if attempt < MAX_RETRIES:
-            print(f"[commit-bot] Sleeping {SLEEP_SECONDS} seconds before retry...")
-            time.sleep(SLEEP_SECONDS)
-
-    print(f"[commit-bot] FAILURE: Remote commit_ver.txt did not reach {new_ver}.")
-    # Exit 2 = push seemed ok but GitHub never reflected new_ver.
+    print("ERROR: push completed but remote verification failed.")
     return 2
 
 
 if __name__ == "__main__":
-    sys.exit(main())
-
+    try:
+        raise SystemExit(main())
+    except Exception as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        raise SystemExit(1)
