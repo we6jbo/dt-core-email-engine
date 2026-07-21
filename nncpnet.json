@@ -2,14 +2,14 @@
   "_read_error": "Expecting value: line 1 column 1 (char 0)",
   "schema": 1,
   "created_utc": "2025-12-21T05:31:41Z",
-  "updated_utc": "2026-07-21T05:18:56Z",
+  "updated_utc": "2026-07-21T18:14:15Z",
   "counters": {
-    "total_errors": 142479
+    "total_errors": 142860
   },
   "error_types": {
     "network_no_route": {
-      "count": 41302,
-      "last_seen_utc": "2026-07-21T05:18:56Z",
+      "count": 41683,
+      "last_seen_utc": "2026-07-21T18:14:16Z",
       "last_error_excerpt": "Error fetching requests: [Errno 113] No route to host"
     },
     "unknown": {
@@ -34,7 +34,7 @@
     }
   },
   "last_observed": {
-    "state_json_age_seconds": 16.27286124229431,
+    "state_json_age_seconds": 36.78305959701538,
     "state_json_stale": false,
     "state_json_path": "/var/lib/dt-core/state.json",
     "required_container": "mailnode",
@@ -44,7 +44,7 @@
     "last_error_summary": "No route to host: system cannot route packets to the destination.",
     "status": "error_present",
     "network_snapshot": {
-      "default_route": "default via 192.168.4.1 dev enxb827eb2f9419 \ndefault via 192.168.4.1 dev enxb827eb2f9419 src 192.168.4.23 metric 100",
+      "default_route": "default via 192.168.4.1 dev enxb827eb2f9419 \ndefault via 192.168.4.1 dev enxb827eb2f9419 src 192.168.4.23 metric 100 \ndefault via 192.168.4.1 dev enxb827eb2f9419 src 192.168.5.215 metric 202",
       "gateway": "192.168.4.1",
       "gateway_ping_ok": true,
       "dns_ok_google": true,
