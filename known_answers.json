@@ -1,0 +1,38 @@
+{
+  "answers": [
+    {
+      "id": "roadmap-next",
+      "enabled": true,
+      "questions": [
+        "whats next on the roadmap",
+        "what is next on the roadmap",
+        "what's next on the roadmap",
+        "next on the roadmap",
+        "what should i do next"
+      ],
+      "answer": "The next step on the roadmap is to review the current project status, finish the highest-priority incomplete task, test that task, and document the result before adding another major feature."
+    },
+    {
+      "id": "check-updates",
+      "enabled": true,
+      "questions": [
+        "how do i check for updates",
+        "how do i update network assistant",
+        "check for updates",
+        "update network assistant"
+      ],
+      "answer": "In Network Assistant AI, enter: check updates. After the update finishes, refresh the page and enter: version."
+    },
+    {
+      "id": "decision-queue",
+      "enabled": true,
+      "questions": [
+        "how do i check pending questions",
+        "where are pending questions",
+        "show decision tree questions",
+        "how do i answer a pending question"
+      ],
+      "answer": "In Network Assistant AI, enter: pending questions. Then use: open question NUMBER. To answer it, use: answer question NUMBER YOUR ANSWER."
+    }
+  ]
+}

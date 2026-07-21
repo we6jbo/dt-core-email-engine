@@ -30,72 +30,6 @@ def main_loop_once() -> None:
     settings = load_email_settings()
     state = load_status_state()
 
-    # Process existing queue work before contacting IMAP. This prevents an
-    # IMAP timeout from blocking approved automatic and human answers.
-    try:
-        updated_before_fetch = answer_existing_pending_questions()
-
-        for queue_id, match in updated_before_fetch:
-            print(
-                "[dt-core] Existing queue question "
-                f"{queue_id} matched approved answer "
-                f"{match.answer_id} "
-                f"(confidence {match.confidence:.2f}).",
-                flush=True,
-            )
-    except Exception as exc:
-        print(
-            "[dt-core] Error auto-answering existing questions "
-            f"before IMAP: {exc}",
-            flush=True,
-        )
-        record_error(
-            state,
-            f"Error auto-answering existing questions before IMAP: {exc}",
-        )
-
-    try:
-        ready_before_fetch = answered_requests()
-    except Exception as exc:
-        print(
-            f"[dt-core] Error reading answered queue before IMAP: {exc}",
-            flush=True,
-        )
-        record_error(
-            state,
-            f"Error reading answered queue before IMAP: {exc}",
-        )
-        ready_before_fetch = []
-
-    for queue_id, request, answer_text in ready_before_fetch:
-        try:
-            if send_dt_out(
-                settings,
-                request,
-                answer_text,
-                state,
-            ):
-                mark_sent(queue_id)
-                record_sent_email(state)
-
-                print(
-                    "[dt-core] Sent pre-IMAP queue answer for question "
-                    f"{queue_id}.",
-                    flush=True,
-                )
-        except Exception as exc:
-            print(
-                "[dt-core] Error sending pre-IMAP queue answer "
-                f"{queue_id}: {exc}",
-                flush=True,
-            )
-            record_error(
-                state,
-                f"Error sending pre-IMAP queue answer {queue_id}: {exc}",
-            )
-
-    save_status_state(state)
-
     print("[dt-core] Polling INBOX...", flush=True)
 
     try:
@@ -105,10 +39,6 @@ def main_loop_once() -> None:
             flush=True,
         )
     except InboxNotCleanError as exc:
-        print(
-            f"[dt-core] Inbox safety error: {exc}. Stopping dt-core.",
-            flush=True,
-        )
         record_error(
             state,
             f"Error fetching requests: {exc}. Stopping dt-core.",
@@ -120,10 +50,6 @@ def main_loop_once() -> None:
         )
         return
     except Exception as exc:
-        print(
-            f"[dt-core] Error fetching requests: {exc}",
-            flush=True,
-        )
         record_error(state, f"Error fetching requests: {exc}")
         save_status_state(state)
         return
