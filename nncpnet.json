@@ -2,14 +2,14 @@
   "_read_error": "Expecting value: line 1 column 1 (char 0)",
   "schema": 1,
   "created_utc": "2025-12-21T05:31:41Z",
-  "updated_utc": "2026-07-21T18:14:15Z",
+  "updated_utc": "2026-07-21T18:52:20Z",
   "counters": {
-    "total_errors": 142860
+    "total_errors": 142877
   },
   "error_types": {
     "network_no_route": {
-      "count": 41683,
-      "last_seen_utc": "2026-07-21T18:14:16Z",
+      "count": 41700,
+      "last_seen_utc": "2026-07-21T18:52:20Z",
       "last_error_excerpt": "Error fetching requests: [Errno 113] No route to host"
     },
     "unknown": {
@@ -34,7 +34,7 @@
     }
   },
   "last_observed": {
-    "state_json_age_seconds": 36.78305959701538,
+    "state_json_age_seconds": 2.9036154747009277,
     "state_json_stale": false,
     "state_json_path": "/var/lib/dt-core/state.json",
     "required_container": "mailnode",
